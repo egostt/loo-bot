@@ -7,6 +7,10 @@ if os.path.exists('.env'):
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Исправляем формат URL для asyncpg
+if DATABASE_URL and DATABASE_URL.startswith("postgresql+asyncpg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
 async def init_db():
     """Инициализация базы данных"""
     conn = await asyncpg.connect(DATABASE_URL)
