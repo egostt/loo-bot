@@ -1,7 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, Text, DateTime, Integer, ForeignKey
+from sqlalchemy import BigInteger, Text, DateTime, Integer, ForeignKey, Boolean, select
 from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -24,7 +24,7 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(Text)
     gender: Mapped[str] = mapped_column(Text)
     region: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, default="pending")
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)  # ⬅️ ДОБАВЬ ЭТО
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Account(Base):
@@ -36,7 +36,6 @@ class Account(Base):
     account_name: Mapped[str] = mapped_column(Text)
     account_gender: Mapped[str] = mapped_column(Text)
     screenshot_file_id: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 async def init_db():
@@ -51,7 +50,8 @@ async def add_user(user_id: int, first_name: str, last_name: str, gender: str, r
             first_name=first_name,
             last_name=last_name,
             gender=gender,
-            region=region
+            region=region,
+            is_approved=False  # ⬅️ ПО УМОЛЧАНИЮ НЕ ОДОБРЕН
         )
         session.add(user)
         await session.commit()
@@ -71,6 +71,62 @@ async def add_account(user_id: int, platform: str, account_name: str, account_ge
 async def get_user_accounts(user_id: int):
     async with async_session_maker() as session:
         result = await session.execute(
-            f"SELECT platform FROM accounts WHERE user_id = {user_id}"
+            select(Account.platform).where(Account.user_id == user_id)  # ⬅️ ИСПРАВЬ ЭТО
         )
         return [row[0] for row in result.fetchall()]
+
+# Получить пользователей на модерации
+async def get_pending_users():
+    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
+        result = await session.execute(
+            select(User).where(User.is_approved == False)
+        )
+        users = result.scalars().all()
+        
+        users_data = []
+        for user in users:
+            accounts_result = await session.execute(
+                select(Account).where(Account.user_id == user.user_id)  # ⬅️ ИСПРАВЬ ЭТО
+            )
+            accounts = accounts_result.scalars().all()
+            
+            users_data.append({
+                "id": user.user_id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "gender": user.gender,
+                "region": user.region,
+                "telegram_id": user.user_id,
+                "accounts": [
+                    {
+                        "platform": acc.platform,
+                        "profile_name": acc.account_name,  # ⬅️ ИСПРАВЬ ЭТО
+                        "screenshot": acc.screenshot_file_id  # ⬅️ ИСПРАВЬ ЭТО
+                    }
+                    for acc in accounts
+                ]
+            })
+        
+        return users_data
+
+# Одобрить пользователя
+async def approve_user_db(telegram_id: int):
+    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
+        result = await session.execute(
+            select(User).where(User.user_id == telegram_id)  # ⬅️ ИСПРАВЬ ЭТО
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            user.is_approved = True
+            await session.commit()
+
+# Отклонить пользователя
+async def reject_user_db(telegram_id: int):
+    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
+        result = await session.execute(
+            select(User).where(User.user_id == telegram_id)  # ⬅️ ИСПРАВЬ ЭТО
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            await session.delete(user)
+            await session.commit()

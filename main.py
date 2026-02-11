@@ -1,32 +1,42 @@
 import asyncio
 import os
-from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, F
-from aiogram.enums.parse_mode import ParseMode
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties
-from aiogram.fsm.state import State, StatesGroup
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (
+    Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, ReplyKeyboardRemove
+)
 from aiohttp import web
-from database import init_db, add_user, add_account, get_user_accounts
+from dotenv import load_dotenv
+from database import init_db, add_user, add_account, get_user_accounts, get_pending_users, approve_user_db, reject_user_db
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # Добавь свой ID в .env
+# ============================================
+# КОНФИГУРАЦИЯ
+# ============================================
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
+BOT_TOKEN = os.getenv("8442623999:AAGjkuVGfd7otX01s35nv7i4TlSxCiFJ9LU")  # ⬅️ СВОЙ ТОКЕН
+ADMIN_IDS = [6164972723]  # ⬅️ СВОЙ TELEGRAM ID
 
-# Платформы
+bot = Bot(token=BOT_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
+
+# ============================================
+# ПЛАТФОРМЫ И ПРИМЕРЫ
+# ============================================
+
 PLATFORMS = [
     "Яндекс.Карты", "Яндекс.Браузер", "Google Maps", "2ГИС",
     "Flamp", "ВКонтакте", "Dream Job", "Avito"
 ]
 
-# Примеры скринов (ID файлов из Google Drive - заменим на Telegram file_id после первой загрузки)
 PLATFORM_EXAMPLES = {
     "Яндекс.Карты": "examples/yandex_maps.jpg",
     "Яндекс.Браузер": "examples/yandex_browser.jpg",
@@ -38,7 +48,12 @@ PLATFORM_EXAMPLES = {
     "Avito": "examples/avito.jpg"
 }
 
-# Состояния FSM
+REGION_PHOTO = "examples/regions.jpg"  # ⬅️ ЗАМЕНИ НА ПУТЬ К ФОТО С РЕГИОНАМИ
+
+# ============================================
+# СОСТОЯНИЯ
+# ============================================
+
 class Register(StatesGroup):
     first_name = State()
     last_name = State()
@@ -46,16 +61,19 @@ class Register(StatesGroup):
     region = State()
     platform_choice = State()
     screenshot = State()
+    account_name = State()
+    confirm_name = State()
     account_gender = State()
     account_gender_confirm = State()
-    account_name = State()
-    account_name_confirm = State()
     more_platforms = State()
 
-# Клавиатуры
+# ============================================
+# КЛАВИАТУРЫ
+# ============================================
+
 gender_kb = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="М", callback_data="gender_M"),
-     InlineKeyboardButton(text="Ж", callback_data="gender_J")]
+    [InlineKeyboardButton(text="👨 Мужской", callback_data="gender_M"),
+     InlineKeyboardButton(text="👩 Женский", callback_data="gender_Ж")]
 ])
 
 start_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -78,57 +96,81 @@ def get_platforms_kb(exclude=[]):
             buttons.append([InlineKeyboardButton(text=platform, callback_data=f"platform_{platform}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Команда /start
+# ============================================
+# WEB SERVER (для Render)
+# ============================================
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+    await site.start()
+    print(f"🌐 Web server started on port {os.getenv('PORT', 8080)}")
+
+# ============================================
+# КОМАНДЫ
+# ============================================
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "👋 Добро пожаловать в <b>LOO BOT 2.0</b>!\n\n"
-        "✨ Чтобы начать выполнение задания, нажмите кнопку ниже:",
+        f"👋 Привет, {message.from_user.first_name}!\n\n"
+        "Это бот для регистрации твоих аккаунтов на различных платформах.\n\n"
+        "Нажми кнопку ниже, чтобы начать:",
         reply_markup=start_kb
     )
+
+# ============================================
+# РЕГИСТРАЦИЯ
+# ============================================
 
 # Начало регистрации
 @dp.callback_query(lambda c: c.data == "start_registration")
 async def start_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
-    await callback.message.answer("👤 Введи своё <b>имя</b>:")
+    await callback.message.answer("✏️ Введи своё имя:")
     await state.set_state(Register.first_name)
 
-# Ввод имени
+# Имя
 @dp.message(Register.first_name)
 async def reg_first_name(message: Message, state: FSMContext):
     await state.update_data(first_name=message.text)
-    await message.answer("👤 Введи свою <b>фамилию</b>:")
+    await message.answer("✏️ Введи свою фамилию:")
     await state.set_state(Register.last_name)
 
-# Ввод фамилии
+# Фамилия
 @dp.message(Register.last_name)
 async def reg_last_name(message: Message, state: FSMContext):
     await state.update_data(last_name=message.text)
     await message.answer("🧠 Укажи свой пол:", reply_markup=gender_kb)
     await state.set_state(Register.gender)
 
-# Выбор пола
+# Выбор пола ПОЛЬЗОВАТЕЛЯ
 @dp.callback_query(Register.gender, lambda c: c.data.startswith("gender_"))
 async def reg_gender(callback: CallbackQuery, state: FSMContext):
-    gender = callback.data.replace("gender_", "")
-    await state.update_data(gender=gender)
+    user_gender = callback.data.replace("gender_", "")
+    await state.update_data(gender=user_gender)
     await callback.message.edit_reply_markup()
     
     # Отправляем фото с регионами
     try:
-        photo = FSInputFile("examples/regions.jpg")
+        photo = FSInputFile(REGION_PHOTO)
         await callback.message.answer_photo(
             photo=photo,
-            caption="🌍 Укажи свой регион (например: Москва, 78 регион):"
+            caption="📍 Выбери свой регион из списка на фото выше ☝️\n\nВведи название региона:"
         )
     except:
-        await callback.message.answer("🌍 Укажи свой регион (например: Москва, 78 регион):")
+        await callback.message.answer("📍 Введи свой регион:")
     
     await state.set_state(Register.region)
 
-# Ввод региона
+# Регион
 @dp.message(Register.region)
 async def reg_region(message: Message, state: FSMContext):
     await state.update_data(region=message.text, accounts=[])
@@ -151,13 +193,20 @@ async def reg_platform(callback: CallbackQuery, state: FSMContext):
         photo = FSInputFile(example_path)
         await callback.message.answer_photo(
             photo=photo,
-            caption=f"📸 Отправь скриншот своего профиля на платформе <b>{platform}</b>\n\n"
-                    f"Пример на фото выше ☝️"
+            caption=f"📸 Пример скриншота для <b>{platform}</b>",
+            parse_mode="HTML"
         )
     except:
-        await callback.message.answer(
-            f"📸 Отправь скриншот своего профиля на платформе <b>{platform}</b>"
-        )
+        pass
+    
+    await callback.message.answer(
+        f"📸 Отправь скриншот своего профиля на платформе <b>{platform}</b>\n\n"
+        f"⚠️ Убедись, что на скрине видно:\n"
+        f"• Название платформы\n"
+        f"• Твоё имя профиля\n"
+        f"• Рейтинг/отзывы (если есть)",
+        parse_mode="HTML"
+    )
     
     await state.set_state(Register.screenshot)
 
@@ -166,8 +215,60 @@ async def reg_platform(callback: CallbackQuery, state: FSMContext):
 async def reg_screenshot(message: Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     await state.update_data(screenshot_file_id=file_id)
-    await message.answer("🧠 Укажи пол этого аккаунта:", reply_markup=gender_kb)
+    
+    data = await state.get_data()
+    platform = data["current_platform"]
+    
+    await message.answer(
+        f"✏️ Введи название профиля, как оно указано на скриншоте для <b>{platform}</b>:",
+        parse_mode="HTML"
+    )
+    await state.set_state(Register.account_name)
+
+# Ввод имени профиля
+@dp.message(Register.account_name)
+async def reg_account_name(message: Message, state: FSMContext):
+    account_name = message.text
+    await state.update_data(account_name=account_name)
+    
+    data = await state.get_data()
+    
+    # Показываем скрин и просим подтвердить
+    await message.answer_photo(
+        photo=data["screenshot_file_id"],
+        caption=(
+            f"📸 Твой скриншот\n\n"
+            f"✏️ Введённое имя профиля: <b>{account_name}</b>\n\n"
+            f"❓ Имя совпадает с тем, что на скриншоте?"
+        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, всё верно", callback_data="name_correct")],
+            [InlineKeyboardButton(text="✏️ Нет, исправить", callback_data="name_incorrect")]
+        ]),
+        parse_mode="HTML"
+    )
+    await state.set_state(Register.confirm_name)
+
+# Подтверждение имени
+@dp.callback_query(Register.confirm_name, lambda c: c.data == "name_correct")
+async def confirm_name_correct(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    
+    # Теперь спрашиваем пол аккаунта
+    await callback.message.answer(
+        "🧠 Укажи пол этого аккаунта:",
+        reply_markup=gender_kb
+    )
     await state.set_state(Register.account_gender)
+
+# Исправление имени
+@dp.callback_query(Register.confirm_name, lambda c: c.data == "name_incorrect")
+async def confirm_name_incorrect(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await callback.message.answer(
+        "✏️ Введи правильное название профиля:"
+    )
+    await state.set_state(Register.account_name)
 
 # Выбор пола аккаунта
 @dp.callback_query(Register.account_gender, lambda c: c.data.startswith("gender_"))
@@ -179,12 +280,14 @@ async def reg_account_gender(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     user_gender = data["gender"]
     
+    # Показываем правило и подтверждение
     await callback.message.answer(
         f"⚠️ <b>Правило:</b> пол аккаунта должен совпадать с полом, указанным при регистрации.\n\n"
-        f"Твой пол: <b>{user_gender}</b>\n"
-        f"Пол аккаунта: <b>{account_gender}</b>\n\n"
-        f"Нажми «Да», если ознакомился и согласен с правилами:",
-        reply_markup=confirm_kb
+        f"Твой пол: <b>{'Мужской' if user_gender == 'M' else 'Женский'}</b>\n"
+        f"Пол аккаунта: <b>{'Мужской' if account_gender == 'M' else 'Женский'}</b>\n\n"
+        f"Нажми «Да», если всё верно:",
+        reply_markup=confirm_kb,
+        parse_mode="HTML"
     )
     await state.set_state(Register.account_gender_confirm)
 
@@ -192,26 +295,9 @@ async def reg_account_gender(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(Register.account_gender_confirm, lambda c: c.data == "confirm_yes")
 async def confirm_gender(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
-    await callback.message.answer("✏️ Введи название аккаунта:")
-    await state.set_state(Register.account_name)
-
-# Ввод названия аккаунта
-@dp.message(Register.account_name)
-async def reg_account_name(message: Message, state: FSMContext):
-    await state.update_data(account_name=message.text)
-    await message.answer(
-        "⚠️ <b>Правило:</b> можно внести только 1 профиль к каждой платформе.\n\n"
-        "Нажми «Да», если ознакомился и согласен с правилами:",
-        reply_markup=confirm_kb
-    )
-    await state.set_state(Register.account_name_confirm)
-
-# Подтверждение названия
-@dp.callback_query(Register.account_name_confirm, lambda c: c.data == "confirm_yes")
-async def confirm_name(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
     
     # Сохраняем аккаунт
+    data = await state.get_data()
     accounts = data.get("accounts", [])
     accounts.append({
         "platform": data["current_platform"],
@@ -221,8 +307,8 @@ async def confirm_name(callback: CallbackQuery, state: FSMContext):
     })
     await state.update_data(accounts=accounts)
     
-    await callback.message.edit_reply_markup()
     await callback.message.answer(
+        "✅ Аккаунт добавлен!\n\n"
         "❓ Есть ещё платформы, на которых у тебя есть профиль?",
         reply_markup=more_platforms_kb
     )
@@ -237,9 +323,12 @@ async def more_platforms(callback: CallbackQuery, state: FSMContext):
         data = await state.get_data()
         used_platforms = [acc["platform"] for acc in data["accounts"]]
         await callback.message.edit_reply_markup()
+        
         await callback.message.answer(
+            "⚠️ <b>Правило:</b> можно добавить только 1 профиль на каждую платформу.\n\n"
             "🌐 Выбери следующую платформу:",
-            reply_markup=get_platforms_kb(exclude=used_platforms)
+            reply_markup=get_platforms_kb(exclude=used_platforms),
+            parse_mode="HTML"
         )
         await state.set_state(Register.platform_choice)
     else:
@@ -250,7 +339,7 @@ async def finish_registration(message: Message, state: FSMContext):
     data = await state.get_data()
     user_id = message.from_user.id
     
-    # Сохраняем в БД
+    # Сохраняем пользователя
     await add_user(
         user_id=user_id,
         first_name=data["first_name"],
@@ -259,6 +348,7 @@ async def finish_registration(message: Message, state: FSMContext):
         region=data["region"]
     )
     
+    # Сохраняем аккаунты
     for acc in data["accounts"]:
         await add_account(
             user_id=user_id,
@@ -268,51 +358,112 @@ async def finish_registration(message: Message, state: FSMContext):
             screenshot_file_id=acc["screenshot"]
         )
     
-    # Отправляем админу на модерацию
-    if ADMIN_ID:
-        admin_text = (
-            f"🆕 <b>Новая заявка на модерацию</b>\n\n"
-            f"👤 Пользователь: {data['first_name']} {data['last_name']}\n"
-            f"🆔 ID: <code>{user_id}</code>\n"
-            f"Пол: {data['gender']}\n"
-            f"Регион: {data['region']}\n\n"
-            f"🌐 Аккаунты ({len(data['accounts'])}):\n"
-        )
-        
-        for i, acc in enumerate(data["accounts"], 1):
-            admin_text += f"{i}. {acc['platform']} — {acc['name']} ({acc['gender']})\n"
-        
-        await bot.send_message(ADMIN_ID, admin_text)
-        
-        for acc in data["accounts"]:
-            await bot.send_photo(
-                ADMIN_ID,
-                photo=acc["screenshot"],
-                caption=f"Скриншот: {acc['platform']}"
-            )
-    
     await message.answer(
         "✅ <b>Регистрация завершена!</b>\n\n"
         "Твои данные отправлены на модерацию.\n"
-        "Ожидай подтверждения от администратора."
+        "Ожидай подтверждения от администратора.",
+        parse_mode="HTML"
     )
     await state.clear()
 
-# Веб-сервер для Render
-async def health_check(request):
-    return web.Response(text="Bot is running")
+# ============================================
+# АДМИН-ПАНЕЛЬ
+# ============================================
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"🌐 Web server started on port {port}")
+@dp.message(Command("admin"))
+async def admin_panel(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ У тебя нет доступа к админ-панели")
+        return
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Пользователи на модерации", callback_data="admin_pending")],
+        [InlineKeyboardButton(text="✅ Одобренные пользователи", callback_data="admin_approved")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")]
+    ])
+    
+    await message.answer(
+        "🔧 <b>Админ-панель</b>\n\nВыбери действие:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
 
-# Запуск бота
+@dp.callback_query(lambda c: c.data == "admin_pending")
+async def show_pending_users(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    
+    pending = await get_pending_users()
+    
+    if not pending:
+        await callback.message.answer("✅ Нет пользователей на модерации")
+        return
+    
+    for user in pending:
+        accounts_text = "\n".join([f"• {acc['platform']}: {acc['profile_name']}" for acc in user['accounts']])
+        
+        text = (
+            f"👤 <b>{user['first_name']} {user['last_name']}</b>\n"
+            f"🆔 Telegram ID: {user['telegram_id']}\n"
+            f"👥 Пол: {user['gender']}\n"
+            f"📍 Регион: {user['region']}\n\n"
+            f"<b>Аккаунты:</b>\n{accounts_text}"
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{user['id']}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{user['id']}")
+            ]
+        ])
+        
+        # Отправляем скрины
+        for acc in user['accounts']:
+            await callback.message.answer_photo(
+                photo=acc['screenshot'],
+                caption=f"<b>{acc['platform']}</b>: {acc['profile_name']}",
+                parse_mode="HTML"
+            )
+        
+        await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+@dp.callback_query(lambda c: c.data.startswith("approve_"))
+async def approve_user(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    
+    user_id = int(callback.data.replace("approve_", ""))
+    await approve_user_db(user_id)
+    
+    await callback.message.edit_text("✅ Пользователь одобрен!")
+    
+    # Уведомляем пользователя
+    await bot.send_message(
+        user_id,
+        "✅ <b>Твоя регистрация одобрена!</b>\n\nТеперь ты можешь получать задания.",
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("reject_"))
+async def reject_user(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    
+    user_id = int(callback.data.replace("reject_", ""))
+    await reject_user_db(user_id)
+    
+    await callback.message.edit_text("❌ Пользователь отклонён")
+    
+    # Уведомляем пользователя
+    await bot.send_message(
+        user_id,
+        "❌ Твоя регистрация отклонена.\n\nСвяжись с администратором для уточнения причин."
+    )
+
+# ============================================
+# ЗАПУСК БОТА
+# ============================================
+
 async def main():
     await init_db()
     me = await bot.get_me()
