@@ -13,14 +13,19 @@ from aiohttp import web
 from dotenv import load_dotenv
 from database import init_db, add_user, add_account, get_user_accounts, get_pending_users, approve_user_db, reject_user_db
 
-load_dotenv()
+# Загружаем .env только если файл существует (локальная разработка)
+if os.path.exists('.env'):
+    load_dotenv()
 
 # ============================================
 # КОНФИГУРАЦИЯ
 # ============================================
 
-BOT_TOKEN = os.getenv("8442623999:AAGjkuVGfd7otX01s35nv7i4TlSxCiFJ9LU")  # ⬅️ СВОЙ ТОКЕН
-ADMIN_IDS = [6164972723]  # ⬅️ СВОЙ TELEGRAM ID
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_IDS = [6164972723]
+
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN не найден! Проверь переменные окружения.")
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -48,7 +53,7 @@ PLATFORM_EXAMPLES = {
     "Avito": "examples/avito.jpg"
 }
 
-REGION_PHOTO = "examples/regions.jpg"  # ⬅️ ЗАМЕНИ НА ПУТЬ К ФОТО С РЕГИОНАМИ
+REGION_PHOTO = "examples/regions.jpg"  # ⬅️ ПУТЬ К ФОТО С РЕГИОНАМИ
 
 # ============================================
 # СОСТОЯНИЯ
