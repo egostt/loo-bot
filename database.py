@@ -1,132 +1,133 @@
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, Text, DateTime, Integer, ForeignKey, Boolean, select
-from datetime import datetime
+import asyncpg
+from dotenv import load_dotenv
+
+if os.path.exists('.env'):
+    load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-engine = create_async_engine(DATABASE_URL, echo=False)
-async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-class Base(DeclarativeBase):
-    pass
-
-class User(Base):
-    __tablename__ = "users"
-    
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    first_name: Mapped[str] = mapped_column(Text)
-    last_name: Mapped[str] = mapped_column(Text)
-    gender: Mapped[str] = mapped_column(Text)
-    region: Mapped[str] = mapped_column(Text)
-    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)  # ⬅️ ДОБАВЬ ЭТО
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class Account(Base):
-    __tablename__ = "accounts"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id"))
-    platform: Mapped[str] = mapped_column(Text)
-    account_name: Mapped[str] = mapped_column(Text)
-    account_gender: Mapped[str] = mapped_column(Text)
-    screenshot_file_id: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Инициализация базы данных"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    # Таблица пользователей
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT,
+            name TEXT,
+            surname TEXT,
+            gender TEXT,
+            region TEXT,
+            approved BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    
+    # Таблица профилей
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS accounts (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
+            platform TEXT,
+            account_name TEXT,
+            screenshot TEXT,
+            gender TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    
+    await conn.close()
     print("✅ База данных инициализирована")
 
-async def add_user(user_id: int, first_name: str, last_name: str, gender: str, region: str):
-    async with async_session_maker() as session:
-        user = User(
-            user_id=user_id,
-            first_name=first_name,
-            last_name=last_name,
-            gender=gender,
-            region=region,
-            is_approved=False  # ⬅️ ПО УМОЛЧАНИЮ НЕ ОДОБРЕН
-        )
-        session.add(user)
-        await session.commit()
+async def add_user(user_id: int, username: str, name: str, surname: str, gender: str, region: str):
+    """Добавление пользователя"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    await conn.execute("""
+        INSERT INTO users (user_id, username, name, surname, gender, region, approved)
+        VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+        ON CONFLICT (user_id) DO UPDATE
+        SET username = $2, name = $3, surname = $4, gender = $5, region = $6
+    """, user_id, username, name, surname, gender, region)
+    
+    await conn.close()
 
-async def add_account(user_id: int, platform: str, account_name: str, account_gender: str, screenshot_file_id: str):
-    async with async_session_maker() as session:
-        account = Account(
-            user_id=user_id,
-            platform=platform,
-            account_name=account_name,
-            account_gender=account_gender,
-            screenshot_file_id=screenshot_file_id
-        )
-        session.add(account)
-        await session.commit()
+async def add_account(user_id: int, platform: str, account_name: str, screenshot: str, gender: str):
+    """Добавление профиля"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    await conn.execute("""
+        INSERT INTO accounts (user_id, platform, account_name, screenshot, gender)
+        VALUES ($1, $2, $3, $4, $5)
+    """, user_id, platform, account_name, screenshot, gender)
+    
+    await conn.close()
+
+async def get_user_by_id(user_id: int):
+    """Получение пользователя с его профилями"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    user = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+    
+    if not user:
+        await conn.close()
+        return None
+    
+    accounts = await conn.fetch("SELECT * FROM accounts WHERE user_id = $1", user_id)
+    
+    await conn.close()
+    
+    return {
+        'user_id': user['user_id'],
+        'username': user['username'],
+        'name': user['name'],
+        'surname': user['surname'],
+        'gender': user['gender'],
+        'region': user['region'],
+        'approved': user['approved'],
+        'accounts': [dict(acc) for acc in accounts]
+    }
 
 async def get_user_accounts(user_id: int):
-    async with async_session_maker() as session:
-        result = await session.execute(
-            select(Account.platform).where(Account.user_id == user_id)  # ⬅️ ИСПРАВЬ ЭТО
-        )
-        return [row[0] for row in result.fetchall()]
+    """Алиас для get_user_by_id (для обратной совместимости)"""
+    return await get_user_by_id(user_id)
 
-# Получить пользователей на модерации
 async def get_pending_users():
-    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
-        result = await session.execute(
-            select(User).where(User.is_approved == False)
-        )
-        users = result.scalars().all()
-        
-        users_data = []
-        for user in users:
-            accounts_result = await session.execute(
-                select(Account).where(Account.user_id == user.user_id)  # ⬅️ ИСПРАВЬ ЭТО
-            )
-            accounts = accounts_result.scalars().all()
-            
-            users_data.append({
-                "id": user.user_id,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "gender": user.gender,
-                "region": user.region,
-                "telegram_id": user.user_id,
-                "accounts": [
-                    {
-                        "platform": acc.platform,
-                        "profile_name": acc.account_name,  # ⬅️ ИСПРАВЬ ЭТО
-                        "screenshot": acc.screenshot_file_id  # ⬅️ ИСПРАВЬ ЭТО
-                    }
-                    for acc in accounts
-                ]
-            })
-        
-        return users_data
+    """Получение пользователей на модерации"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    users = await conn.fetch("SELECT * FROM users WHERE approved = FALSE")
+    
+    result = []
+    for user in users:
+        accounts = await conn.fetch("SELECT * FROM accounts WHERE user_id = $1", user['user_id'])
+        result.append({
+            'user_id': user['user_id'],
+            'username': user['username'],
+            'name': user['name'],
+            'surname': user['surname'],
+            'gender': user['gender'],
+            'region': user['region'],
+            'accounts': [dict(acc) for acc in accounts]
+        })
+    
+    await conn.close()
+    return result
 
-# Одобрить пользователя
-async def approve_user_db(telegram_id: int):
-    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
-        result = await session.execute(
-            select(User).where(User.user_id == telegram_id)  # ⬅️ ИСПРАВЬ ЭТО
-        )
-        user = result.scalar_one_or_none()
-        if user:
-            user.is_approved = True
-            await session.commit()
+async def approve_user_db(user_id: int):
+    """Одобрение пользователя"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("UPDATE users SET approved = TRUE WHERE user_id = $1", user_id)
+    await conn.close()
 
-# Отклонить пользователя
-async def reject_user_db(telegram_id: int):
-    async with async_session_maker() as session:  # ⬅️ ИСПРАВЬ ЭТО
-        result = await session.execute(
-            select(User).where(User.user_id == telegram_id)  # ⬅️ ИСПРАВЬ ЭТО
-        )
-        user = result.scalar_one_or_none()
-        if user:
-            await session.delete(user)
-            await session.commit()
+async def reject_user_db(user_id: int):
+    """Отклонение пользователя (удаление)"""
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("DELETE FROM users WHERE user_id = $1", user_id)
+    await conn.close()
+
+async def remove_platform_from_available(user_id: int, platform: str):
+    """Удаление платформы из доступных (не используется, но оставлена для совместимости)"""
+    pass
