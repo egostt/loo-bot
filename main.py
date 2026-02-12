@@ -152,11 +152,10 @@ async def process_gender(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.delete()
     
-    # Отправляем изображение с регионами
-    photo = FSInputFile("regions.jpg")
-    await callback.message.answer_photo(
-        photo=photo,
-        caption="🌍 Выбери свой регион:\n\nВведи код региона (например, 01) или название города:"
+    # ВРЕМЕННО БЕЗ ИЗОБРАЖЕНИЯ
+    await callback.message.answer(
+        "🌍 Выбери свой регион:\n\n"
+        "Введи код региона (например, 01) или название города:"
     )
     await state.set_state(Registration.region)
 
@@ -201,12 +200,7 @@ async def accept_platform_rules(callback: CallbackQuery, state: FSMContext):
     
     await callback.message.delete()
     
-    # Отправляем пример скриншота
-    screenshot_file = PLATFORM_SCREENSHOTS.get(platform)
-    if screenshot_file and os.path.exists(screenshot_file):
-        photo = FSInputFile(screenshot_file)
-        await callback.message.answer_photo(photo=photo, caption=f"📸 Пример скриншота для {platform}")
-    
+    # БЕЗ ПРИМЕРА СКРИНШОТА
     await callback.message.answer(
         f"📸 Отправь скриншот своего профиля на платформе {platform}\n\n"
         f"⚠️ Убедись, что на скрине видно:\n"
