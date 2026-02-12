@@ -436,22 +436,23 @@ async def main():
     print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
     print(f"🗄️ DATABASE_URL: {'✅ Установлен' if DATABASE_URL else '❌ Не установлен'}")
     
-    # СРАЗУ запускаем веб-сервер (чтобы Render не убил процесс)
+    # Запускаем веб-сервер
     await start_web_server()
     print("✅ Веб-сервер запущен")
-    
-    # Ждём завершения старых процессов ПОСЛЕ открытия порта
-    print("⏳ Ожидание завершения старых процессов...")
-    await asyncio.sleep(60)  # 60 секунд
     
     # Инициализация БД
     await init_db()
     print("✅ База данных инициализирована")
     
-    # Настройка бота
-    dp.include_router(router)
+    # Удаляем webhook и старые обновления
     await bot.delete_webhook(drop_pending_updates=True)
     print("🧹 Webhook удалён, старые обновления сброшены")
+    
+    # Небольшая задержка для завершения старых процессов
+    await asyncio.sleep(5)
+    
+    # Настройка бота
+    dp.include_router(router)
     
     # Запуск polling
     print("🔄 Запуск polling...")
