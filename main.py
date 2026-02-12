@@ -434,7 +434,7 @@ async def start_web_server():
 async def main():
     # Ждём завершения старых процессов
     print("⏳ Ожидание завершения старых процессов...")
-    await asyncio.sleep(15)
+    await asyncio.sleep(30)
     
     print("🚀 Запуск бота...")
     print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
