@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 from database import *
+from aiohttp import web  # ← ДОБАВЬ ЭТУ СТРОКУ
 
 if os.path.exists('.env'):
     load_dotenv()
@@ -432,7 +433,29 @@ async def main():
     print("🧹 Webhook удалён, старые обновления сброшены")
     
     print("🔄 Запуск polling...")
+    
+    # Запускаем веб-сервер для Render
+    asyncio.create_task(start_web_server())
+    
     await dp.start_polling(bot)
+
+# ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
+from aiohttp import web
+
+async def health_check(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    port = int(os.getenv("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 Веб-сервер запущен на порту {port}")
 
 if __name__ == "__main__":
     try:
