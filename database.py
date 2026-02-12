@@ -29,21 +29,20 @@ async def init_db():
         )
     """)
     
-    # Таблица профилей
+    # Таблица аккаунтов
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
-            platform TEXT,
-            account_name TEXT,
-            screenshot TEXT,
-            gender TEXT,
+            platform TEXT NOT NULL,
+            account_name TEXT NOT NULL,
+            screenshot TEXT NOT NULL,
+            gender TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
     
     await conn.close()
-    print("✅ База данных инициализирована")
 
 async def add_user(user_id: int, username: str, name: str, surname: str, gender: str, region: str):
     """Добавление пользователя"""
