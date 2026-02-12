@@ -436,18 +436,20 @@ async def main():
     print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
     print(f"🗄️ DATABASE_URL: {'✅ Установлен' if DATABASE_URL else '❌ Не установлен'}")
     
+    # СНАЧАЛА запускаем веб-сервер (чтобы Render увидел порт)
+    await start_web_server()
+    print("✅ Веб-сервер запущен")
+    
+    # Инициализация БД
     await init_db()
     print("✅ База данных инициализирована")
     
+    # Настройка бота
     dp.include_router(router)
-    
     await bot.delete_webhook(drop_pending_updates=True)
     print("🧹 Webhook удалён, старые обновления сброшены")
     
-    # СНАЧАЛА запускаем веб-сервер
-    await start_web_server()
-    
-    # ПОТОМ запускаем polling
+    # Запуск polling
     print("🔄 Запуск polling...")
     await dp.start_polling(bot)
 
