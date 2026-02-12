@@ -445,7 +445,7 @@ async def main():
     await asyncio.sleep(60)  # 60 секунд
     
     # Инициализация БД
-    await init_db()
+    await _db()
     print("✅ База данных инициализирована")
     
     # Настройка бота
