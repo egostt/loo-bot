@@ -418,27 +418,6 @@ async def reject_user(callback: CallbackQuery):
     await callback.message.edit_text(f"❌ Пользователь {user_id} отклонён!")
     await bot.send_message(user_id, "❌ Твоя заявка отклонена. Для повторной попытки напиши /start")
 
-# ============ ЗАПУСК БОТА ============
-async def main():
-    print("🚀 Запуск бота...")
-    print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
-    print(f"🗄️ DATABASE_URL: {'✅ Установлен' if DATABASE_URL else '❌ Не установлен'}")
-    
-    await init_db()
-    print("✅ База данных инициализирована")
-    
-    dp.include_router(router)
-    
-    await bot.delete_webhook(drop_pending_updates=True)
-    print("🧹 Webhook удалён, старые обновления сброшены")
-    
-    print("🔄 Запуск polling...")
-    
-    # Запускаем веб-сервер для Render
-    asyncio.create_task(start_web_server())
-    
-    await dp.start_polling(bot)
-
 # ============ ВЕБ-СЕРВЕР ДЛЯ RENDER ============
 from aiohttp import web
 
@@ -456,6 +435,27 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"🌐 Веб-сервер запущен на порту {port}")
+
+# ============ ЗАПУСК БОТА ============
+async def main():
+    print("🚀 Запуск бота...")
+    print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
+    print(f"🗄️ DATABASE_URL: {'✅ Установлен' if DATABASE_URL else '❌ Не установлен'}")
+    
+    await init_db()
+    print("✅ База данных инициализирована")
+    
+    dp.include_router(router)
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    print("🧹 Webhook удалён, старые обновления сброшены")
+    
+    # СНАЧАЛА запускаем веб-сервер
+    await start_web_server()
+    
+    # ПОТОМ запускаем polling
+    print("🔄 Запуск polling...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
