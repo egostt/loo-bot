@@ -432,6 +432,10 @@ async def start_web_server():
 
 # ============ ЗАПУСК БОТА ============
 async def main():
+    # Ждём завершения старых процессов
+    print("⏳ Ожидание завершения старых процессов...")
+    await asyncio.sleep(15)
+    
     print("🚀 Запуск бота...")
     print(f"📡 BOT_TOKEN: {BOT_TOKEN[:10] if BOT_TOKEN else '❌ НЕ УСТАНОВЛЕН'}...")
     print(f"🗄️ DATABASE_URL: {'✅ Установлен' if DATABASE_URL else '❌ Не установлен'}")
